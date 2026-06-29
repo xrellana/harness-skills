@@ -47,6 +47,7 @@ def load_rows(
     source: str,
     api_url: str | None = None,
 ) -> tuple[list[dict[str, object]], str]:
+    tushare_client.load_skill_env()
     if source == "sample" or (source == "auto" and not os.environ.get("TUSHARE_TOKEN")):
         return make_sample_rows(), "sample-data"
     rows = tushare_client.fetch_daily_bars(symbol, start, end, api_url=api_url)

@@ -19,7 +19,13 @@ python tushare-quant/scripts/tq.py backtest --symbol 600519.SH --strategy macd -
 python tushare-quant/scripts/tq.py sample
 ```
 
-Live data requires `TUSHARE_TOKEN`. Reverse-proxy deployments can set `TUSHARE_API_URL` or pass `--api-url https://your-proxy.example/api`. If the token is unavailable, use `--source sample` only for tool validation and say clearly that sample data is not market data.
+Live data requires `TUSHARE_TOKEN`. The bundled Python scripts automatically load `tushare-quant/.env` before fetching data, so local users can put `TUSHARE_TOKEN=...` there instead of configuring Codex settings. Use `tushare-quant/.env.example` as the template; never commit the real `.env` file. External environment variables take precedence over values in `.env`, and `--api-url` takes precedence over `TUSHARE_API_URL`.
+
+Reverse-proxy deployments can set `TUSHARE_API_URL` in `.env`, export it in the shell, or pass `--api-url https://your-proxy.example/api`. If the token is unavailable, use `--source sample` only for tool validation and say clearly that sample data is not market data.
+
+Encoding note: this skill and its references are UTF-8. On Windows PowerShell, read Chinese files with explicit UTF-8, for example `Get-Content -Encoding UTF8 tushare-quant\references\beginner-terms-zh.md`. If Python command output appears garbled in a terminal, set `PYTHONIOENCODING=utf-8` for that command or run through a UTF-8 terminal.
+
+API note: `tq.py` fetches live daily bars through `ts.pro_bar(..., api=api)` so `adj="qfq"` can return forward-adjusted prices. Tushare's `daily` endpoint uses `ts_code`, `trade_date`, `start_date`, and `end_date`, but it returns unadjusted daily行情. Tushare documents `pro_bar` as an SDK integration interface rather than a raw HTTP endpoint, so use `TUSHARE_API_URL` only with a DataApi-compatible reverse proxy that supports the endpoints the SDK calls.
 
 ## Workflow
 

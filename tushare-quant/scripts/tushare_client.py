@@ -1,13 +1,57 @@
 """Tushare access helpers.
 
-The skill never stores tokens. Set TUSHARE_TOKEN in the environment before
-using live data.
+The skill never stores tokens in tracked files. Put local credentials in
+``tushare-quant/.env`` or set environment variables before using live data.
 """
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Iterable
+
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ENV_FILE = SKILL_ROOT / ".env"
+
+
+def _strip_env_value(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+        return cleaned[1:-1]
+    return cleaned
+
+
+def load_env_file(path: str | os.PathLike[str] | None = None, override: bool = False) -> dict[str, str]:
+    env_path = Path(path) if path is not None else DEFAULT_ENV_FILE
+    if not env_path.exists():
+        return {}
+
+    loaded: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        loaded[key] = _strip_env_value(value)
+
+    for key, value in loaded.items():
+        if override:
+            os.environ[key] = value
+        else:
+            os.environ.setdefault(key, value)
+    return loaded
+
+
+def load_skill_env() -> dict[str, str]:
+    return load_env_file(DEFAULT_ENV_FILE)
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -51,6 +95,7 @@ def fetch_daily_bars(
     api_url: str | None = None,
     api_url_env: str = "TUSHARE_API_URL",
 ) -> list[dict[str, object]]:
+    load_skill_env()
     token = os.environ.get(token_env)
     if not token:
         raise RuntimeError(f"Set {token_env} before fetching live Tushare data")
@@ -66,10 +111,10 @@ def fetch_daily_bars(
     if resolved_api_url:
         api = ts.pro_api(token)
         # Tushare stores the endpoint on DataApi as a private attribute. Setting
-        # the mangled name keeps pro_bar usable while allowing reverse proxies.
+        # the mangled name keeps SDK-level pro_bar usable with compatible proxies.
         setattr(api, "_DataApi__http_url", resolved_api_url)
         frame = ts.pro_bar(
-            pro_api=api,
+            api=api,
             ts_code=ts_code,
             adj=adj,
             start_date=start_date,
