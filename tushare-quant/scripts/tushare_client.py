@@ -48,6 +48,8 @@ def fetch_daily_bars(
     end_date: str,
     adj: str = "qfq",
     token_env: str = "TUSHARE_TOKEN",
+    api_url: str | None = None,
+    api_url_env: str = "TUSHARE_API_URL",
 ) -> list[dict[str, object]]:
     token = os.environ.get(token_env)
     if not token:
@@ -60,7 +62,21 @@ def fetch_daily_bars(
 
     ts.set_token(token)
     ts_code = normalize_symbol(symbol)
-    frame = ts.pro_bar(ts_code=ts_code, adj=adj, start_date=start_date, end_date=end_date)
+    resolved_api_url = api_url or os.environ.get(api_url_env)
+    if resolved_api_url:
+        api = ts.pro_api(token)
+        # Tushare stores the endpoint on DataApi as a private attribute. Setting
+        # the mangled name keeps pro_bar usable while allowing reverse proxies.
+        setattr(api, "_DataApi__http_url", resolved_api_url)
+        frame = ts.pro_bar(
+            pro_api=api,
+            ts_code=ts_code,
+            adj=adj,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    else:
+        frame = ts.pro_bar(ts_code=ts_code, adj=adj, start_date=start_date, end_date=end_date)
     return _frame_to_rows(frame)
 
 

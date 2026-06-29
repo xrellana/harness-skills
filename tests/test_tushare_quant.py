@@ -1,4 +1,7 @@
 import importlib.util
+import os
+import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -53,6 +56,84 @@ class TushareQuantTests(unittest.TestCase):
         self.assertGreater(result["total_return_pct"], 0)
         self.assertLessEqual(result["max_drawdown_pct"], 0)
         self.assertEqual(len(result["equity_curve"]), len(rows))
+
+    def test_fetch_daily_bars_uses_custom_api_url(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, calls = make_fake_tushare_module()
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        try:
+            rows = tushare_client.fetch_daily_bars(
+                "600519",
+                "20240101",
+                "20240102",
+                token_env="TUSHARE_TEST_TOKEN",
+                api_url="https://tushare-proxy.example/api",
+            )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+        self.assertEqual(calls["token"], "test-token")
+        self.assertEqual(calls["api"]._DataApi__http_url, "https://tushare-proxy.example/api")
+        self.assertIs(calls["pro_bar"]["pro_api"], calls["api"])
+        self.assertEqual(rows[0]["trade_date"], "20240101")
+
+    def test_fetch_daily_bars_uses_custom_api_url_from_environment(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, calls = make_fake_tushare_module()
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        os.environ["TUSHARE_API_URL"] = "https://env-proxy.example/api"
+        try:
+            tushare_client.fetch_daily_bars(
+                "600519",
+                "20240101",
+                "20240102",
+                token_env="TUSHARE_TEST_TOKEN",
+            )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+            os.environ.pop("TUSHARE_API_URL", None)
+
+        self.assertEqual(calls["api"]._DataApi__http_url, "https://env-proxy.example/api")
+
+
+class FakeFrame:
+    def to_dict(self, orient):
+        if orient != "records":
+            raise ValueError("unexpected orient")
+        return [
+            {"trade_date": "20240102", "open": 10, "high": 11, "low": 9, "close": 10.5, "vol": 100},
+            {"trade_date": "20240101", "open": 9, "high": 10, "low": 8, "close": 9.5, "vol": 90},
+        ]
+
+
+class FakeApi:
+    pass
+
+
+def make_fake_tushare_module():
+    calls = {}
+    fake_tushare = types.ModuleType("tushare")
+
+    def set_token(token):
+        calls["token"] = token
+
+    def pro_api(token):
+        calls["pro_api_token"] = token
+        calls["api"] = FakeApi()
+        return calls["api"]
+
+    def pro_bar(**kwargs):
+        calls["pro_bar"] = kwargs
+        return FakeFrame()
+
+    fake_tushare.set_token = set_token
+    fake_tushare.pro_api = pro_api
+    fake_tushare.pro_bar = pro_bar
+    return fake_tushare, calls
 
 
 if __name__ == "__main__":

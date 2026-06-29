@@ -40,11 +40,20 @@ def make_sample_rows(days: int = 90) -> list[dict[str, object]]:
     return rows
 
 
-def load_rows(symbol: str, start: str, end: str, source: str) -> tuple[list[dict[str, object]], str]:
+def load_rows(
+    symbol: str,
+    start: str,
+    end: str,
+    source: str,
+    api_url: str | None = None,
+) -> tuple[list[dict[str, object]], str]:
     if source == "sample" or (source == "auto" and not os.environ.get("TUSHARE_TOKEN")):
         return make_sample_rows(), "sample-data"
-    rows = tushare_client.fetch_daily_bars(symbol, start, end)
-    return tushare_client.ensure_rows(rows), "tushare"
+    rows = tushare_client.fetch_daily_bars(symbol, start, end, api_url=api_url)
+    data_source = "tushare"
+    if api_url or os.environ.get("TUSHARE_API_URL"):
+        data_source = "tushare-custom-url"
+    return tushare_client.ensure_rows(rows), data_source
 
 
 def build_signals(rows: list[dict[str, object]], strategy: str) -> list[int]:
@@ -56,13 +65,13 @@ def build_signals(rows: list[dict[str, object]], strategy: str) -> list[int]:
 
 
 def command_analyze(args: argparse.Namespace) -> str:
-    rows, source = load_rows(args.symbol, args.start, args.end, args.source)
+    rows, source = load_rows(args.symbol, args.start, args.end, args.source, args.api_url)
     enriched = indicators.add_indicators(rows)
     return report.format_indicator_report(args.symbol, enriched, source)
 
 
 def command_backtest(args: argparse.Namespace) -> str:
-    rows, source = load_rows(args.symbol, args.start, args.end, args.source)
+    rows, source = load_rows(args.symbol, args.start, args.end, args.source, args.api_url)
     enriched = indicators.add_indicators(rows)
     signals = build_signals(enriched, args.strategy)
     result = backtest.run_signal_backtest(
@@ -83,6 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--start", default="20230101", help="Start date, YYYYMMDD")
         command_parser.add_argument("--end", default=date.today().strftime("%Y%m%d"), help="End date, YYYYMMDD")
         command_parser.add_argument("--source", choices=["auto", "tushare", "sample"], default="auto")
+        command_parser.add_argument("--api-url", default=None, help="Custom Tushare Pro URL, e.g. a reverse proxy")
 
     analyze_parser = subparsers.add_parser("analyze", help="Generate a beginner-friendly indicator report")
     add_data_args(analyze_parser)
@@ -106,12 +116,19 @@ def main() -> None:
     elif args.command == "backtest":
         output = command_backtest(args)
     elif args.command == "sample":
-        analyze_args = argparse.Namespace(symbol=args.symbol, start="20240101", end="20241231", source="sample")
+        analyze_args = argparse.Namespace(
+            symbol=args.symbol,
+            start="20240101",
+            end="20241231",
+            source="sample",
+            api_url=None,
+        )
         backtest_args = argparse.Namespace(
             symbol=args.symbol,
             start="20240101",
             end="20241231",
             source="sample",
+            api_url=None,
             strategy="macd",
             initial_cash=100000.0,
             fee_rate=0.001,

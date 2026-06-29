@@ -19,12 +19,12 @@ python tushare-quant/scripts/tq.py backtest --symbol 600519.SH --strategy macd -
 python tushare-quant/scripts/tq.py sample
 ```
 
-Live data requires `TUSHARE_TOKEN`. If the token is unavailable, use `--source sample` only for tool validation and say clearly that sample data is not market data.
+Live data requires `TUSHARE_TOKEN`. Reverse-proxy deployments can set `TUSHARE_API_URL` or pass `--api-url https://your-proxy.example/api`. If the token is unavailable, use `--source sample` only for tool validation and say clearly that sample data is not market data.
 
 ## Workflow
 
 1. Restate the research question as a measurable rule: symbol, date range, data frequency, indicator, strategy, benchmark, and cost assumptions.
-2. Fetch data through `scripts/tushare_client.py` or run `scripts/tq.py`. Always sort bars by ascending `trade_date`.
+2. Fetch data through `scripts/tushare_client.py` or run `scripts/tq.py`. Use `TUSHARE_API_URL` or `--api-url` when the user has a non-official Tushare endpoint. Always sort bars by ascending `trade_date`.
 3. Add indicators with `scripts/indicators.py`. Prefer forward-adjusted prices for trend and backtest work unless the user asks otherwise.
 4. For strategies, run `scripts/backtest.py` and report total return, max drawdown, trade count, fee assumptions, and limitations.
 5. Explain terms in plain Chinese. Load `references/beginner-terms-zh.md` when the user is a beginner or asks what a term means.
