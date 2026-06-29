@@ -50,11 +50,13 @@ def load_rows(
     tushare_client.load_skill_env()
     if source == "sample" or (source == "auto" and not os.environ.get("TUSHARE_TOKEN")):
         return make_sample_rows(), "sample-data"
-    rows = tushare_client.fetch_daily_bars(symbol, start, end, api_url=api_url)
+    result = tushare_client.fetch_daily_bars_result(symbol, start, end, api_url=api_url)
     data_source = "tushare"
     if api_url or os.environ.get("TUSHARE_API_URL"):
         data_source = "tushare-custom-url"
-    return tushare_client.ensure_rows(rows), data_source
+    if result.adjustment == "unadjusted-fallback":
+        data_source = f"{data_source} (unadjusted fallback: missing adj_factor)"
+    return tushare_client.ensure_rows(result.rows), data_source
 
 
 def build_signals(rows: list[dict[str, object]], strategy: str) -> list[int]:
@@ -112,31 +114,34 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.command == "analyze":
-        output = command_analyze(args)
-    elif args.command == "backtest":
-        output = command_backtest(args)
-    elif args.command == "sample":
-        analyze_args = argparse.Namespace(
-            symbol=args.symbol,
-            start="20240101",
-            end="20241231",
-            source="sample",
-            api_url=None,
-        )
-        backtest_args = argparse.Namespace(
-            symbol=args.symbol,
-            start="20240101",
-            end="20241231",
-            source="sample",
-            api_url=None,
-            strategy="macd",
-            initial_cash=100000.0,
-            fee_rate=0.001,
-        )
-        output = command_analyze(analyze_args) + "\n\n---\n\n" + command_backtest(backtest_args)
-    else:
-        parser.error(f"unknown command: {args.command}")
+    try:
+        if args.command == "analyze":
+            output = command_analyze(args)
+        elif args.command == "backtest":
+            output = command_backtest(args)
+        elif args.command == "sample":
+            analyze_args = argparse.Namespace(
+                symbol=args.symbol,
+                start="20240101",
+                end="20241231",
+                source="sample",
+                api_url=None,
+            )
+            backtest_args = argparse.Namespace(
+                symbol=args.symbol,
+                start="20240101",
+                end="20241231",
+                source="sample",
+                api_url=None,
+                strategy="macd",
+                initial_cash=100000.0,
+                fee_rate=0.001,
+            )
+            output = command_analyze(analyze_args) + "\n\n---\n\n" + command_backtest(backtest_args)
+        else:
+            parser.error(f"unknown command: {args.command}")
+    except (RuntimeError, ValueError) as exc:
+        parser.exit(1, f"Error: {exc}\n")
     print(output)
 
 

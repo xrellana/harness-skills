@@ -1,4 +1,6 @@
 import importlib.util
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -83,8 +85,29 @@ class TushareQuantTests(unittest.TestCase):
             sys.modules.pop("tushare", None)
             os.environ.pop("TUSHARE_TEST_TOKEN", None)
 
-        self.assertEqual(calls["token"], "test-token")
+        self.assertNotIn("token", calls)
+        self.assertEqual(calls["pro_api_token"], "test-token")
         self.assertEqual(calls["api"]._DataApi__http_url, "https://tushare-proxy.example/api")
+        self.assertIs(calls["pro_bar"]["api"], calls["api"])
+        self.assertEqual(rows[0]["trade_date"], "20240101")
+
+    def test_fetch_daily_bars_passes_token_through_api_without_calling_set_token(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, calls = make_fake_tushare_module(set_token_raises=True)
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        try:
+            rows = tushare_client.fetch_daily_bars(
+                "600519",
+                "20240101",
+                "20240102",
+                token_env="TUSHARE_TEST_TOKEN",
+            )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+        self.assertEqual(calls["pro_api_token"], "test-token")
         self.assertIs(calls["pro_bar"]["api"], calls["api"])
         self.assertEqual(rows[0]["trade_date"], "20240101")
 
@@ -162,8 +185,104 @@ class TushareQuantTests(unittest.TestCase):
                 os.environ.pop("TUSHARE_TEST_TOKEN", None)
                 os.environ.pop("TUSHARE_API_URL", None)
 
-        self.assertEqual(calls["token"], "file-token")
+        self.assertNotIn("token", calls)
+        self.assertEqual(calls["pro_api_token"], "file-token")
         self.assertEqual(calls["api"]._DataApi__http_url, "https://file-proxy.example/api")
+
+    def test_fetch_daily_bars_falls_back_to_unadjusted_when_qfq_adj_factor_is_unavailable(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, calls = make_fake_tushare_module(fail_adjusted=True)
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        try:
+            result = tushare_client.fetch_daily_bars_result(
+                "600519",
+                "20240101",
+                "20240102",
+                token_env="TUSHARE_TEST_TOKEN",
+                api_url="https://tushare-proxy.example/api",
+            )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+        self.assertEqual([call["adj"] for call in calls["pro_bar_calls"]], ["qfq"])
+        self.assertEqual(calls["daily"]["ts_code"], "600519.SH")
+        self.assertEqual(result.adjustment, "unadjusted-fallback")
+        self.assertIn("adj_factor", result.warning)
+        self.assertEqual(result.rows[0]["trade_date"], "20240101")
+
+    def test_fetch_daily_bars_raises_clear_error_when_no_rows_are_returned(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, _calls = make_fake_tushare_module(frame=EmptyFrame())
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        try:
+            with self.assertRaisesRegex(tushare_client.TushareDataError, "No Tushare bars returned"):
+                tushare_client.fetch_daily_bars(
+                    "600519",
+                    "20240101",
+                    "20240102",
+                    token_env="TUSHARE_TEST_TOKEN",
+                    api_url="https://tushare-proxy.example/api",
+                )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+    def test_fetch_daily_bars_suppresses_noisy_sdk_prints_and_keeps_error_details(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, _calls = make_fake_tushare_module(print_and_raise="proxy socket blocked")
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                with self.assertRaisesRegex(tushare_client.TushareDataError, "proxy socket blocked"):
+                    tushare_client.fetch_daily_bars(
+                        "600519",
+                        "20240101",
+                        "20240102",
+                        token_env="TUSHARE_TEST_TOKEN",
+                        api_url="https://tushare-proxy.example/api",
+                    )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_token_error_from_unadjusted_fallback_is_not_masked_as_adj_factor_error(self):
+        tushare_client = load_module("tushare_client")
+        fake_tushare, _calls = make_fake_tushare_module(
+            fail_adjusted=True,
+            daily_error="Tushare API daily failed: Token无效或已过期，请联系客服续费",
+        )
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        try:
+            with self.assertRaisesRegex(tushare_client.TushareDataError, "^Tushare API daily failed"):
+                tushare_client.fetch_daily_bars(
+                    "600519",
+                    "20240101",
+                    "20240102",
+                    token_env="TUSHARE_TEST_TOKEN",
+                    api_url="https://tushare-proxy.example/api",
+                )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+    def test_data_api_payload_error_includes_proxy_message(self):
+        tushare_client = load_module("tushare_client")
+
+        with self.assertRaisesRegex(tushare_client.TushareDataError, "Token无效或已过期"):
+            tushare_client._frame_from_data_api_payload(
+                "daily",
+                401,
+                {"code": -1, "msg": "Token无效或已过期，请联系客服续费"},
+                "",
+            )
 
     def test_auto_source_uses_env_file_before_falling_back_to_sample_data(self):
         tq = load_tq_module()
@@ -187,8 +306,30 @@ class TushareQuantTests(unittest.TestCase):
                 sys.modules.pop("tushare_client", None)
 
         self.assertEqual(source, "tushare-custom-url")
-        self.assertEqual(calls["token"], "file-token")
+        self.assertNotIn("token", calls)
+        self.assertEqual(calls["pro_api_token"], "file-token")
         self.assertEqual(rows[0]["trade_date"], "20240101")
+
+    def test_load_rows_marks_unadjusted_fallback_source(self):
+        tq = load_tq_module()
+        fake_tushare, _calls = make_fake_tushare_module(fail_adjusted=True)
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TOKEN"] = "test-token"
+        try:
+            rows, source = tq.load_rows(
+                "600519",
+                "20240101",
+                "20240102",
+                "tushare",
+                api_url="https://tushare-proxy.example/api",
+            )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TOKEN", None)
+            sys.modules.pop("tushare_client", None)
+
+        self.assertEqual(rows[0]["trade_date"], "20240101")
+        self.assertIn("unadjusted fallback", source)
 
     def test_skill_warns_windows_users_to_read_chinese_files_as_utf8(self):
         skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
@@ -215,31 +356,57 @@ class FakeFrame:
         ]
 
 
+class EmptyFrame:
+    def to_dict(self, orient):
+        if orient != "records":
+            raise ValueError("unexpected orient")
+        return []
+
+
 class FakeApi:
     pass
 
 
-def make_fake_tushare_module():
-    calls = {}
+def make_fake_tushare_module(frame=None, fail_adjusted=False, set_token_raises=False, print_and_raise=None, daily_error=None):
+    calls = {"pro_bar_calls": []}
     fake_tushare = types.ModuleType("tushare")
+    response_frame = frame or FakeFrame()
 
     def set_token(token):
+        if set_token_raises:
+            raise PermissionError("should not write tk.csv")
         calls["token"] = token
 
     def pro_api(token):
         calls["pro_api_token"] = token
         calls["api"] = FakeApi()
+
+        def daily(**kwargs):
+            calls["daily"] = kwargs
+            if daily_error:
+                raise RuntimeError(daily_error)
+            return response_frame
+
+        calls["api"].daily = daily
         return calls["api"]
 
-    def pro_bar(*, api=None, ts_code="", adj=None, start_date="", end_date=""):
-        calls["pro_bar"] = {
+    def pro_bar(*, api=None, ts_code="", adj=None, start_date="", end_date="", retry_count=3):
+        call = {
             "api": api,
             "ts_code": ts_code,
             "adj": adj,
             "start_date": start_date,
             "end_date": end_date,
+            "retry_count": retry_count,
         }
-        return FakeFrame()
+        calls["pro_bar"] = call
+        calls["pro_bar_calls"].append(call)
+        if print_and_raise:
+            print(print_and_raise)
+            raise RuntimeError("ERROR.")
+        if fail_adjusted and adj:
+            raise KeyError("None of [Index(['trade_date', 'adj_factor'], dtype='str')] are in the [columns]")
+        return response_frame
 
     fake_tushare.set_token = set_token
     fake_tushare.pro_api = pro_api

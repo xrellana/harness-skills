@@ -27,6 +27,8 @@ Encoding note: this skill and its references are UTF-8. On Windows PowerShell, r
 
 API note: `tq.py` fetches live daily bars through `ts.pro_bar(..., api=api)` so `adj="qfq"` can return forward-adjusted prices. Tushare's `daily` endpoint uses `ts_code`, `trade_date`, `start_date`, and `end_date`, but it returns unadjusted daily行情. Tushare documents `pro_bar` as an SDK integration interface rather than a raw HTTP endpoint, so use `TUSHARE_API_URL` only with a DataApi-compatible reverse proxy that supports the endpoints the SDK calls.
 
+When a DataApi-compatible proxy does not return usable `adj_factor` data for `qfq`, the CLI retries with unadjusted daily bars and marks the data source as `unadjusted fallback: missing adj_factor`. Treat those reports as unadjusted-price analysis and mention that复权数据 was unavailable.
+
 ## Workflow
 
 1. Restate the research question as a measurable rule: symbol, date range, data frequency, indicator, strategy, benchmark, and cost assumptions.
