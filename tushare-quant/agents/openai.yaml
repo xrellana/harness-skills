@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tushare Quant"
+  short_description: "用 Tushare 做 A 股量化分析、指标和回测。"
+  default_prompt: "Use $tushare-quant to analyze an A-share stock with Tushare data and explain the quant signals in beginner-friendly Chinese."
