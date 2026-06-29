@@ -345,6 +345,12 @@ class TushareQuantTests(unittest.TestCase):
         self.assertIn("tushare-quant/.env", skill_text)
         self.assertIn("External environment variables take precedence", skill_text)
 
+    def test_skill_documents_fetch_daily_bars_import(self):
+        skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("from scripts.tushare_client import fetch_daily_bars", skill_text)
+        self.assertNotIn("get_client", skill_text)
+
 
 class FakeFrame:
     def to_dict(self, orient):

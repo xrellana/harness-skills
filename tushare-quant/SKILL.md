@@ -21,6 +21,16 @@ python tushare-quant/scripts/tq.py sample
 
 Live data requires `TUSHARE_TOKEN`. The bundled Python scripts automatically load `tushare-quant/.env` before fetching data, so local users can put `TUSHARE_TOKEN=...` there instead of configuring Codex settings. Use `tushare-quant/.env.example` as the template; never commit the real `.env` file. External environment variables take precedence over values in `.env`, and `--api-url` takes precedence over `TUSHARE_API_URL`.
 
+When writing a small one-off Python script, import the daily-bar helper directly:
+
+```python
+from scripts.tushare_client import fetch_daily_bars
+
+rows = fetch_daily_bars("600519.SH", "20230101", "20261231")
+```
+
+Use `fetch_daily_bars_result(...)` instead when the caller needs adjustment metadata such as `unadjusted-fallback`.
+
 Reverse-proxy deployments can set `TUSHARE_API_URL` in `.env`, export it in the shell, or pass `--api-url https://your-proxy.example/api`. If the token is unavailable, use `--source sample` only for tool validation and say clearly that sample data is not market data.
 
 Encoding note: this skill and its references are UTF-8. On Windows PowerShell, read Chinese files with explicit UTF-8, for example `Get-Content -Encoding UTF8 tushare-quant\references\beginner-terms-zh.md`. If Python command output appears garbled in a terminal, set `PYTHONIOENCODING=utf-8` for that command or run through a UTF-8 terminal.
@@ -32,7 +42,7 @@ When a DataApi-compatible proxy does not return usable `adj_factor` data for `qf
 ## Workflow
 
 1. Restate the research question as a measurable rule: symbol, date range, data frequency, indicator, strategy, benchmark, and cost assumptions.
-2. Fetch data through `scripts/tushare_client.py` or run `scripts/tq.py`. Use `TUSHARE_API_URL` or `--api-url` when the user has a non-official Tushare endpoint. Always sort bars by ascending `trade_date`.
+2. Fetch data with `fetch_daily_bars(...)` from `scripts/tushare_client.py` or run `scripts/tq.py`. Use `TUSHARE_API_URL` or `--api-url` when the user has a non-official Tushare endpoint. Always sort bars by ascending `trade_date`.
 3. Add indicators with `scripts/indicators.py`. Prefer forward-adjusted prices for trend and backtest work unless the user asks otherwise.
 4. For strategies, run `scripts/backtest.py` and report total return, max drawdown, trade count, fee assumptions, and limitations.
 5. Explain terms in plain Chinese. Load `references/beginner-terms-zh.md` when the user is a beginner or asks what a term means.
