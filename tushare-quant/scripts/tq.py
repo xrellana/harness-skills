@@ -70,7 +70,16 @@ def build_signals(rows: list[dict[str, object]], strategy: str) -> list[int]:
 def command_analyze(args: argparse.Namespace) -> str:
     rows, source = load_rows(args.symbol, args.start, args.end, args.source, args.api_url)
     enriched = indicators.add_indicators(rows)
-    return report.format_indicator_report(args.symbol, enriched, source)
+    analysis = None
+    if source != "sample-data":
+        analysis = tushare_client.fetch_analysis_bundle(
+            args.symbol,
+            args.start,
+            args.end,
+            benchmark=args.benchmark,
+            api_url=args.api_url,
+        )
+    return report.format_indicator_report(args.symbol, enriched, source, analysis=analysis)
 
 
 def command_backtest(args: argparse.Namespace) -> str:
@@ -99,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze_parser = subparsers.add_parser("analyze", help="Generate a beginner-friendly indicator report")
     add_data_args(analyze_parser)
+    analyze_parser.add_argument("--benchmark", default="000300.SH", help="Benchmark index code, e.g. 000300.SH")
 
     backtest_parser = subparsers.add_parser("backtest", help="Run a simple long-only strategy backtest")
     add_data_args(backtest_parser)
@@ -126,6 +136,7 @@ def main() -> None:
                 end="20241231",
                 source="sample",
                 api_url=None,
+                benchmark="000300.SH",
             )
             backtest_args = argparse.Namespace(
                 symbol=args.symbol,

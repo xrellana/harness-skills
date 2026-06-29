@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import math
 import os
 from pathlib import Path
 from typing import Iterable
@@ -109,6 +110,31 @@ def _frame_to_rows(frame: object) -> list[dict[str, object]]:
     return sorted(rows, key=lambda row: str(row["trade_date"]))
 
 
+def _clean_record_value(value: object) -> object:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return None
+    except TypeError:
+        pass
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except ValueError:
+            return value
+    return value
+
+
+def _frame_to_records(frame: object) -> list[dict[str, object]]:
+    if frame is None:
+        return []
+    records = frame.to_dict("records")
+    rows = [{str(key): _clean_record_value(value) for key, value in record.items()} for record in records]
+    return sorted(rows, key=lambda row: str(row.get("trade_date") or row.get("end_date") or row.get("ann_date") or ""))
+
+
 def _is_adjustment_data_error(exc: BaseException) -> bool:
     message = str(exc)
     return "adj_factor" in message or ("trade_date" in message and "columns" in message)
@@ -158,6 +184,15 @@ def _call_daily(api: object, ts_code: str, start_date: str, end_date: str) -> ob
             http_url,
         )
     return api.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+
+def _call_pro_api_endpoint(api: object, api_name: str, params: dict[str, object]) -> object:
+    if type(api).__name__ == "DataApi":
+        token = getattr(api, "_DataApi__token")
+        http_url = getattr(api, "_DataApi__http_url")
+        return _query_data_api(api, token, api_name, params, http_url)
+    method = getattr(api, api_name)
+    return method(**params)
 
 
 def _frame_from_data_api_payload(api_name: str, status_code: int, payload: dict[str, object], text: str) -> object:
@@ -278,6 +313,77 @@ def fetch_daily_bars_result(
                     f"and the unadjusted fallback also failed: {fallback_exc}"
                 ) from fallback_exc
         raise TushareDataError(f"Tushare pro_bar failed for {ts_code} from {start_date} to {end_date}: {exc}") from exc
+
+
+def _make_api(
+    token_env: str,
+    api_url: str | None,
+    api_url_env: str,
+) -> object:
+    load_skill_env()
+    token = os.environ.get(token_env)
+    if not token:
+        raise RuntimeError(f"Set {token_env} before fetching live Tushare data")
+    try:
+        import tushare as ts
+    except ImportError as exc:
+        raise RuntimeError("Install tushare before fetching live data: pip install tushare") from exc
+
+    resolved_api_url = api_url or os.environ.get(api_url_env)
+    api = ts.pro_api(token)
+    if resolved_api_url:
+        setattr(api, "_DataApi__http_url", resolved_api_url)
+    return api
+
+
+def fetch_analysis_bundle(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    benchmark: str = "000300.SH",
+    token_env: str = "TUSHARE_TOKEN",
+    api_url: str | None = None,
+    api_url_env: str = "TUSHARE_API_URL",
+) -> dict[str, object]:
+    """Fetch optional datasets used by the comprehensive single-stock report."""
+
+    api = _make_api(token_env, api_url, api_url_env)
+    ts_code = normalize_symbol(symbol)
+    bundle: dict[str, object] = {
+        "daily_basic": [],
+        "moneyflow": [],
+        "benchmark": {"code": benchmark, "rows": []},
+        "fina_indicator": [],
+        "adj_factor": [],
+        "stk_limit": [],
+        "suspend_d": [],
+        "warnings": [],
+    }
+    endpoint_params = {
+        "daily_basic": {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        "moneyflow": {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        "index_daily": {"ts_code": benchmark, "start_date": start_date, "end_date": end_date},
+        "fina_indicator": {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        "adj_factor": {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        "stk_limit": {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        "suspend_d": {"ts_code": ts_code, "start_date": start_date, "end_date": end_date, "suspend_type": "S"},
+    }
+
+    warnings = bundle["warnings"]
+    assert isinstance(warnings, list)
+    for endpoint, params in endpoint_params.items():
+        try:
+            frame = _call_pro_api_endpoint(api, endpoint, params)
+            rows = _frame_to_records(frame)
+        except Exception as exc:
+            warnings.append(f"{endpoint}: {exc}")
+            rows = []
+
+        if endpoint == "index_daily":
+            bundle["benchmark"] = {"code": benchmark, "rows": rows}
+        else:
+            bundle[endpoint] = rows
+    return bundle
 
 
 def fetch_daily_bars(
