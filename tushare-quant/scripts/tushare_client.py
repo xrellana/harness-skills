@@ -17,6 +17,9 @@ from typing import Iterable
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = SKILL_ROOT / ".env"
 REQUIRED_BAR_FIELDS = ("trade_date", "open", "high", "low", "close", "vol")
+TRADE_DATE_FALLBACK_ENDPOINTS = {"stk_limit", "suspend_d"}
+TRANSIENT_HTTP_STATUSES = {502, 503, 504}
+DATA_API_MAX_ATTEMPTS = 2
 
 
 class TushareDataError(RuntimeError):
@@ -195,6 +198,43 @@ def _call_pro_api_endpoint(api: object, api_name: str, params: dict[str, object]
     return method(**params)
 
 
+def _filter_records_by_ts_code(rows: list[dict[str, object]], ts_code: str) -> list[dict[str, object]]:
+    return [row for row in rows if not row.get("ts_code") or str(row.get("ts_code")) == ts_code]
+
+
+def _query_endpoint_records(
+    api: object,
+    api_name: str,
+    params: dict[str, object],
+    ts_code_filter: str | None = None,
+) -> list[dict[str, object]]:
+    frame = _call_pro_api_endpoint(api, api_name, params)
+    rows = _frame_to_records(frame)
+    if ts_code_filter:
+        return _filter_records_by_ts_code(rows, ts_code_filter)
+    return rows
+
+
+def _query_by_trade_dates(
+    api: object,
+    api_name: str,
+    ts_code: str,
+    trade_dates: Iterable[str],
+    base_params: dict[str, object],
+) -> tuple[list[dict[str, object]], list[str]]:
+    rows: list[dict[str, object]] = []
+    warnings: list[str] = []
+    for trade_date in sorted({str(value) for value in trade_dates if value}):
+        params = {"ts_code": ts_code, "trade_date": trade_date}
+        if api_name == "suspend_d" and base_params.get("suspend_type"):
+            params["suspend_type"] = base_params["suspend_type"]
+        try:
+            rows.extend(_query_endpoint_records(api, api_name, params, ts_code_filter=ts_code))
+        except Exception as exc:
+            warnings.append(f"{api_name} {trade_date}: {exc}")
+    return rows, warnings
+
+
 def _frame_from_data_api_payload(api_name: str, status_code: int, payload: dict[str, object], text: str) -> object:
     if status_code >= 400:
         message = payload.get("msg") if isinstance(payload, dict) else None
@@ -220,24 +260,34 @@ def _query_data_api(api: object, token: str, api_name: str, params: dict[str, ob
 
     request_params = dict(params)
     request_params.setdefault("ts_type_name", http_url)
-    response = requests.post(
-        f"{http_url.rstrip('/')}/{api_name}",
-        json={
-            "api_name": api_name,
-            "token": token,
-            "params": request_params,
-            "fields": "",
-        },
-        timeout=getattr(api, "_DataApi__timeout", 30),
-    )
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise TushareDataError(
-            f"Tushare API {api_name} returned HTTP {response.status_code} with non-JSON response: "
-            f"{response.text[:200]}"
-        ) from exc
-    return _frame_from_data_api_payload(api_name, response.status_code, payload, response.text)
+    request_body = {
+        "api_name": api_name,
+        "token": token,
+        "params": request_params,
+        "fields": "",
+    }
+    response = None
+    for attempt in range(DATA_API_MAX_ATTEMPTS):
+        response = requests.post(
+            f"{http_url.rstrip('/')}/{api_name}",
+            json=request_body,
+            timeout=getattr(api, "_DataApi__timeout", 30),
+        )
+        retry_available = attempt < DATA_API_MAX_ATTEMPTS - 1
+        if response.status_code in TRANSIENT_HTTP_STATUSES and retry_available:
+            continue
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            if response.status_code in TRANSIENT_HTTP_STATUSES and retry_available:
+                continue
+            raise TushareDataError(
+                f"Tushare API {api_name} returned HTTP {response.status_code} with non-JSON response: "
+                f"{response.text[:200]}"
+            ) from exc
+        return _frame_from_data_api_payload(api_name, response.status_code, payload, response.text)
+
+    raise TushareDataError(f"Tushare API {api_name} did not return a response")
 
 
 def _result_from_frame(
@@ -341,6 +391,7 @@ def fetch_analysis_bundle(
     start_date: str,
     end_date: str,
     benchmark: str = "000300.SH",
+    trade_dates: Iterable[str] | None = None,
     token_env: str = "TUSHARE_TOKEN",
     api_url: str | None = None,
     api_url_env: str = "TUSHARE_API_URL",
@@ -373,11 +424,20 @@ def fetch_analysis_bundle(
     assert isinstance(warnings, list)
     for endpoint, params in endpoint_params.items():
         try:
-            frame = _call_pro_api_endpoint(api, endpoint, params)
-            rows = _frame_to_records(frame)
+            rows = _query_endpoint_records(
+                api,
+                endpoint,
+                params,
+                ts_code_filter=ts_code if endpoint != "index_daily" else benchmark,
+            )
         except Exception as exc:
-            warnings.append(f"{endpoint}: {exc}")
-            rows = []
+            if endpoint in TRADE_DATE_FALLBACK_ENDPOINTS and trade_dates:
+                rows, fallback_warnings = _query_by_trade_dates(api, endpoint, ts_code, trade_dates, params)
+                warnings.append(f"{endpoint}: range query failed ({exc}); used trade_date fallback")
+                warnings.extend(fallback_warnings)
+            else:
+                warnings.append(f"{endpoint}: {exc}")
+                rows = []
 
         if endpoint == "index_daily":
             bundle["benchmark"] = {"code": benchmark, "rows": rows}

@@ -77,6 +77,7 @@ def command_analyze(args: argparse.Namespace) -> str:
             args.start,
             args.end,
             benchmark=args.benchmark,
+            trade_dates=[str(row["trade_date"]) for row in rows],
             api_url=args.api_url,
         )
     return report.format_indicator_report(args.symbol, enriched, source, analysis=analysis)

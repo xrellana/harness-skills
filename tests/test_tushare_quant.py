@@ -197,6 +197,67 @@ class TushareQuantTests(unittest.TestCase):
         self.assertEqual(bundle["benchmark"]["rows"][0]["close"], 3360.0)
         self.assertEqual(bundle["warnings"], [])
 
+    def test_fetch_analysis_bundle_falls_back_to_trade_dates_for_flaky_limit_and_suspend_ranges(self):
+        tushare_client = load_module("tushare_client")
+
+        def fail_range_queries(kwargs):
+            if "start_date" in kwargs:
+                return "HTTP 502 Bad Gateway"
+            return None
+
+        def limit_frame(kwargs):
+            return RecordsFrame(
+                [
+                    {
+                        "ts_code": kwargs["ts_code"],
+                        "trade_date": kwargs["trade_date"],
+                        "up_limit": 11.0,
+                        "down_limit": 9.0,
+                    }
+                ]
+            )
+
+        def suspend_frame(kwargs):
+            return RecordsFrame(
+                [
+                    {"ts_code": "000001.SZ", "trade_date": kwargs["trade_date"], "suspend_type": "S"},
+                    {"ts_code": kwargs["ts_code"], "trade_date": kwargs["trade_date"], "suspend_type": "S"},
+                ]
+            )
+
+        fake_tushare, calls = make_fake_tushare_module(
+            endpoint_frames={
+                "stk_limit": limit_frame,
+                "suspend_d": suspend_frame,
+            },
+            endpoint_errors={
+                "stk_limit": fail_range_queries,
+                "suspend_d": fail_range_queries,
+            },
+        )
+        sys.modules["tushare"] = fake_tushare
+        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
+        try:
+            bundle = tushare_client.fetch_analysis_bundle(
+                "300476",
+                "20240101",
+                "20240110",
+                benchmark="000300.SH",
+                trade_dates=["20240102", "20240103"],
+                token_env="TUSHARE_TEST_TOKEN",
+                api_url="https://tushare-proxy.example/api",
+            )
+        finally:
+            sys.modules.pop("tushare", None)
+            os.environ.pop("TUSHARE_TEST_TOKEN", None)
+
+        self.assertEqual([row["trade_date"] for row in bundle["stk_limit"]], ["20240102", "20240103"])
+        self.assertEqual([row["trade_date"] for row in bundle["suspend_d"]], ["20240102", "20240103"])
+        self.assertTrue(all(row["ts_code"] == "300476.SZ" for row in bundle["suspend_d"]))
+        self.assertEqual([call.get("trade_date") for call in calls["stk_limit_calls"][1:]], ["20240102", "20240103"])
+        self.assertEqual([call.get("trade_date") for call in calls["suspend_d_calls"][1:]], ["20240102", "20240103"])
+        self.assertTrue(any("used trade_date fallback" in warning for warning in bundle["warnings"]))
+
     def test_fetch_daily_bars_uses_custom_api_url(self):
         tushare_client = load_module("tushare_client")
         fake_tushare, calls = make_fake_tushare_module()
@@ -413,6 +474,50 @@ class TushareQuantTests(unittest.TestCase):
                 "",
             )
 
+    def test_query_data_api_retries_transient_gateway_errors(self):
+        tushare_client = load_module("tushare_client")
+        requests_module = types.ModuleType("requests")
+        responses = [
+            FakeResponse(502, "<html>Bad Gateway</html>", json_error=True),
+            FakeResponse(
+                200,
+                "",
+                payload={
+                    "code": 0,
+                    "msg": "",
+                    "data": {
+                        "fields": ["trade_date", "value"],
+                        "items": [["20240102", 1.0]],
+                    },
+                },
+            ),
+        ]
+        calls = []
+
+        def post(url, json, timeout):
+            calls.append({"url": url, "json": json, "timeout": timeout})
+            return responses.pop(0)
+
+        requests_module.post = post
+        original_requests = sys.modules.get("requests")
+        sys.modules["requests"] = requests_module
+        try:
+            frame = tushare_client._query_data_api(
+                FakeApi(),
+                "test-token",
+                "adj_factor",
+                {"ts_code": "300476.SZ"},
+                "https://tushare-proxy.example/api",
+            )
+        finally:
+            if original_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = original_requests
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(frame.to_dict("records")[0]["trade_date"], "20240102")
+
     def test_auto_source_uses_env_file_before_falling_back_to_sample_data(self):
         tq = load_tq_module()
         fake_tushare, calls = make_fake_tushare_module()
@@ -538,6 +643,22 @@ class RecordsFrame:
         return self.records
 
 
+class FakeResponse:
+    def __init__(self, status_code, text, payload=None, json_error=False):
+        self.status_code = status_code
+        self.text = text
+        self.payload = payload
+        self.json_error = json_error
+
+    def json(self):
+        if self.json_error:
+            raise ValueError("not json")
+        return self.payload
+
+    def __bool__(self):
+        return True
+
+
 class FakeApi:
     pass
 
@@ -584,9 +705,16 @@ def make_fake_tushare_module(
         ]:
             def endpoint_method(_endpoint=endpoint, **kwargs):
                 calls[_endpoint] = kwargs
+                calls.setdefault(f"{_endpoint}_calls", []).append(kwargs)
                 if _endpoint in endpoint_errors:
-                    raise RuntimeError(endpoint_errors[_endpoint])
-                return endpoint_frames.get(_endpoint, response_frame)
+                    error = endpoint_errors[_endpoint]
+                    message = error(kwargs) if callable(error) else error
+                    if message:
+                        raise RuntimeError(message)
+                frame = endpoint_frames.get(_endpoint, response_frame)
+                if callable(frame):
+                    return frame(kwargs)
+                return frame
 
             setattr(calls["api"], endpoint, endpoint_method)
         return calls["api"]
