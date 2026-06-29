@@ -474,6 +474,27 @@ class TushareQuantTests(unittest.TestCase):
         self.assertIn("tushare-quant/.env", skill_text)
         self.assertIn("External environment variables take precedence", skill_text)
 
+    def test_skill_documents_local_virtualenv_python_usage(self):
+        skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("tushare-quant/.venv", skill_text)
+        self.assertIn(r"tushare-quant\.venv\Scripts\python.exe", skill_text)
+        self.assertIn("tushare-quant/.venv/bin/python", skill_text)
+        self.assertNotRegex(skill_text, r"(?m)^python tushare-quant/scripts/tq\.py analyze")
+
+    def test_requirements_declares_live_data_dependencies(self):
+        requirements_path = ROOT / "tushare-quant" / "requirements.txt"
+
+        self.assertTrue(requirements_path.exists())
+        requirements = {
+            line.strip()
+            for line in requirements_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+
+        for dependency in ["tushare", "pandas", "requests"]:
+            self.assertIn(dependency, requirements)
+
     def test_skill_documents_fetch_daily_bars_import(self):
         skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
 

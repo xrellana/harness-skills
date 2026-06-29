@@ -11,13 +11,33 @@ Use this skill to turn Tushare Pro data into disciplined, beginner-friendly A-sh
 
 ## Quick Start
 
-Use the bundled CLI when the user wants a fast first pass:
+Use a skill-local virtual environment at `tushare-quant/.venv`. If it is missing, create it and install the bundled dependencies before running live-data scripts:
+
+```powershell
+py -m venv tushare-quant\.venv
+tushare-quant\.venv\Scripts\python.exe -m pip install -r tushare-quant\requirements.txt
+```
 
 ```bash
-python tushare-quant/scripts/tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
-python tushare-quant/scripts/tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
-python tushare-quant/scripts/tq.py sample
+python3 -m venv tushare-quant/.venv
+tushare-quant/.venv/bin/python -m pip install -r tushare-quant/requirements.txt
 ```
+
+Use the bundled CLI through the venv Python when the user wants a fast first pass:
+
+```powershell
+tushare-quant\.venv\Scripts\python.exe tushare-quant\scripts\tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
+tushare-quant\.venv\Scripts\python.exe tushare-quant\scripts\tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
+tushare-quant\.venv\Scripts\python.exe tushare-quant\scripts\tq.py sample
+```
+
+```bash
+tushare-quant/.venv/bin/python tushare-quant/scripts/tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
+tushare-quant/.venv/bin/python tushare-quant/scripts/tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
+tushare-quant/.venv/bin/python tushare-quant/scripts/tq.py sample
+```
+
+Use system Python only to create the virtual environment. Do not run the bundled scripts with global Python unless explicitly troubleshooting environment setup.
 
 Live data requires `TUSHARE_TOKEN`. The bundled Python scripts automatically load `tushare-quant/.env` before fetching data, so local users can put `TUSHARE_TOKEN=...` there instead of configuring Codex settings. Use `tushare-quant/.env.example` as the template; never commit the real `.env` file. External environment variables take precedence over values in `.env`, and `--api-url` takes precedence over `TUSHARE_API_URL`.
 
@@ -42,7 +62,7 @@ When a DataApi-compatible proxy does not return usable `adj_factor` data for `qf
 ## Workflow
 
 1. Restate the research question as a measurable rule: symbol, date range, data frequency, indicator, strategy, benchmark, and cost assumptions.
-2. Fetch data with `fetch_daily_bars(...)` from `scripts/tushare_client.py` or run `scripts/tq.py`. Use `TUSHARE_API_URL` or `--api-url` when the user has a non-official Tushare endpoint. Always sort bars by ascending `trade_date`.
+2. Fetch data with `fetch_daily_bars(...)` from `scripts/tushare_client.py` or run `scripts/tq.py` through `tushare-quant/.venv/bin/python` on macOS/Linux or `tushare-quant\.venv\Scripts\python.exe` on Windows. Use `TUSHARE_API_URL` or `--api-url` when the user has a non-official Tushare endpoint. Always sort bars by ascending `trade_date`.
 3. Add indicators with `scripts/indicators.py`. Prefer forward-adjusted prices for trend and backtest work unless the user asks otherwise.
 4. For individual stock reports, do not stop at MA/MACD/KDJ. Include volume, turnover, max drawdown, valuation, financial quality, benchmark relative strength, adjustment method, limit-up/limit-down, suspension, and explicit data gaps.
 5. For strategies, run `scripts/backtest.py` and report total return, max drawdown, trade count, fee assumptions, and limitations.
