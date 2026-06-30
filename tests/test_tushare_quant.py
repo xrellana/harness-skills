@@ -616,6 +616,33 @@ class TushareQuantTests(unittest.TestCase):
         self.assertNotEqual(raised.exception.code, 0)
         self.assertIn("unrecognized arguments: --api-url", stderr.getvalue())
 
+    def test_tq_cli_configures_stdio_utf8_for_chinese_output(self):
+        tq = load_tq_module()
+
+        class FakeStream:
+            encoding = "cp1252"
+            errors = "strict"
+
+            def __init__(self):
+                self.reconfigure_calls = []
+
+            def reconfigure(self, **kwargs):
+                self.reconfigure_calls.append(kwargs)
+                self.encoding = kwargs.get("encoding", self.encoding)
+                self.errors = kwargs.get("errors", self.errors)
+
+        stdout = FakeStream()
+        stderr = FakeStream()
+
+        tq.configure_utf8_stdio(stdout=stdout, stderr=stderr)
+
+        self.assertEqual(stdout.encoding, "utf-8")
+        self.assertEqual(stdout.errors, "replace")
+        self.assertEqual(stderr.encoding, "utf-8")
+        self.assertEqual(stderr.errors, "replace")
+        self.assertEqual(stdout.reconfigure_calls, [{"encoding": "utf-8", "errors": "replace"}])
+        self.assertEqual(stderr.reconfigure_calls, [{"encoding": "utf-8", "errors": "replace"}])
+
     def test_skill_warns_windows_users_to_read_chinese_files_as_utf8(self):
         script_guide = ROOT / "tushare-quant" / "references" / "script-guide.md"
         guide_text = script_guide.read_text(encoding="utf-8")

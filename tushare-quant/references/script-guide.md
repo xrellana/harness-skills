@@ -34,7 +34,7 @@ This skill and its references are UTF-8. On Windows PowerShell, read Chinese fil
 Get-Content -Encoding UTF8 tushare-quant\references\beginner-terms-zh.md
 ```
 
-If Python command output appears garbled in a terminal, set `PYTHONIOENCODING=utf-8` for that command or run through a UTF-8 terminal.
+`scripts/tq.py` configures its stdout and stderr streams as UTF-8 at startup so Chinese report output does not depend on the Windows display language or active code page. If you wrap lower-level helpers in your own Python script and output still appears garbled, set `PYTHONIOENCODING=utf-8` for that command or run through a UTF-8 terminal.
 
 ## `scripts/tq.py`
 

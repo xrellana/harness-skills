@@ -5,12 +5,35 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import sys
 from datetime import date, timedelta
 
 import backtest
 import indicators
 import report
 import tushare_client
+
+
+def _is_utf8_stream(stream: object) -> bool:
+    encoding = (getattr(stream, "encoding", "") or "").replace("_", "-").lower()
+    return encoding in {"utf-8", "utf8"}
+
+
+def _configure_stream_utf8(stream: object) -> None:
+    if _is_utf8_stream(stream):
+        return
+    reconfigure = getattr(stream, "reconfigure", None)
+    if not callable(reconfigure):
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return
+
+
+def configure_utf8_stdio(stdout: object | None = None, stderr: object | None = None) -> None:
+    _configure_stream_utf8(sys.stdout if stdout is None else stdout)
+    _configure_stream_utf8(sys.stderr if stderr is None else stderr)
 
 
 def make_sample_rows(days: int = 90) -> list[dict[str, object]]:
@@ -120,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    configure_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
     try:
