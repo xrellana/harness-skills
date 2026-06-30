@@ -29,21 +29,21 @@ Purpose: command-line entry point for fast first-pass reports.
 
 Python executable:
 
-- Windows Python: `tushare-quant\.venv\Scripts\python.exe`
-- Linux/macOS Python: `tushare-quant/.venv/bin/python`
+- Windows Python: `.venv/Scripts/python.exe`
+- Linux/macOS Python: `.venv/bin/python`
 
-Commands:
+Sample Commands:
 
 ```powershell
-tushare-quant\.venv\Scripts\python.exe tushare-quant\scripts\tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
-tushare-quant\.venv\Scripts\python.exe tushare-quant\scripts\tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
-tushare-quant\.venv\Scripts\python.exe tushare-quant\scripts\tq.py sample
+.venv/Scripts/python.exe scripts/tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
+.venv/Scripts/python.exe scripts/tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
+.venv/Scripts/python.exe scripts/tq.py sample
 ```
 
 ```bash
-tushare-quant/.venv/bin/python tushare-quant/scripts/tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
-tushare-quant/.venv/bin/python tushare-quant/scripts/tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
-tushare-quant/.venv/bin/python tushare-quant/scripts/tq.py sample
+.venv/bin/python scripts/tq.py analyze --symbol 600519.SH --start 20230101 --end 20261231
+.venv/bin/python scripts/tq.py backtest --symbol 600519.SH --strategy macd --start 20230101 --end 20261231
+.venv/bin/python scripts/tq.py sample
 ```
 
 Required inputs for `analyze`: `--symbol`, `--start`, and `--end` for a real request. `--benchmark` defaults to `000300.SH`. `--source` accepts `auto`, `tushare`, or `sample`; default is `auto`.
