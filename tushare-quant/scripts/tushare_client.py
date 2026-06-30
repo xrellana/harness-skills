@@ -69,7 +69,7 @@ def load_env_file(path: str | os.PathLike[str] | None = None, override: bool = F
 
 
 def load_skill_env() -> dict[str, str]:
-    return load_env_file(DEFAULT_ENV_FILE)
+    return load_env_file(DEFAULT_ENV_FILE, override=True)
 
 
 def normalize_symbol(symbol: str) -> str:

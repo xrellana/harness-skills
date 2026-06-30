@@ -301,25 +301,33 @@ class TushareQuantTests(unittest.TestCase):
         self.assertIs(calls["pro_bar"]["api"], calls["api"])
         self.assertEqual(rows[0]["trade_date"], "20240101")
 
-    def test_fetch_daily_bars_uses_custom_api_url_from_environment(self):
+    def test_fetch_daily_bars_uses_custom_api_url_from_skill_env_file(self):
         tushare_client = load_module("tushare_client")
         fake_tushare, calls = make_fake_tushare_module()
         sys.modules["tushare"] = fake_tushare
-        os.environ["TUSHARE_TEST_TOKEN"] = "test-token"
-        os.environ["TUSHARE_API_URL"] = "https://env-proxy.example/api"
-        try:
-            tushare_client.fetch_daily_bars(
-                "600519",
-                "20240101",
-                "20240102",
-                token_env="TUSHARE_TEST_TOKEN",
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "TUSHARE_TEST_TOKEN=file-token\nTUSHARE_API_URL=https://file-proxy.example/api\n",
+                encoding="utf-8",
             )
-        finally:
-            sys.modules.pop("tushare", None)
-            os.environ.pop("TUSHARE_TEST_TOKEN", None)
-            os.environ.pop("TUSHARE_API_URL", None)
+            tushare_client.DEFAULT_ENV_FILE = env_path
+            os.environ["TUSHARE_TEST_TOKEN"] = "shell-token"
+            os.environ["TUSHARE_API_URL"] = "https://shell-proxy.example/api"
+            try:
+                tushare_client.fetch_daily_bars(
+                    "600519",
+                    "20240101",
+                    "20240102",
+                    token_env="TUSHARE_TEST_TOKEN",
+                )
+            finally:
+                sys.modules.pop("tushare", None)
+                os.environ.pop("TUSHARE_TEST_TOKEN", None)
+                os.environ.pop("TUSHARE_API_URL", None)
 
-        self.assertEqual(calls["api"]._DataApi__http_url, "https://env-proxy.example/api")
+        self.assertEqual(calls["pro_api_token"], "file-token")
+        self.assertEqual(calls["api"]._DataApi__http_url, "https://file-proxy.example/api")
 
     def test_load_env_file_reads_values_without_overwriting_existing_environment(self):
         tushare_client = load_module("tushare_client")
@@ -348,6 +356,29 @@ class TushareQuantTests(unittest.TestCase):
         self.assertEqual(loaded["TUSHARE_TEST_TOKEN"], "file-token")
         self.assertEqual(token_value, "shell-token")
         self.assertEqual(loaded["TUSHARE_API_URL"], "https://file-proxy.example/api")
+        self.assertEqual(api_url_value, "https://file-proxy.example/api")
+
+    def test_load_skill_env_uses_env_file_as_harness_source(self):
+        tushare_client = load_module("tushare_client")
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "TUSHARE_TEST_TOKEN=file-token\nTUSHARE_API_URL=https://file-proxy.example/api\n",
+                encoding="utf-8",
+            )
+            tushare_client.DEFAULT_ENV_FILE = env_path
+            os.environ["TUSHARE_TEST_TOKEN"] = "shell-token"
+            os.environ["TUSHARE_API_URL"] = "https://shell-proxy.example/api"
+            try:
+                loaded = tushare_client.load_skill_env()
+                token_value = os.environ.get("TUSHARE_TEST_TOKEN")
+                api_url_value = os.environ.get("TUSHARE_API_URL")
+            finally:
+                os.environ.pop("TUSHARE_TEST_TOKEN", None)
+                os.environ.pop("TUSHARE_API_URL", None)
+
+        self.assertEqual(loaded["TUSHARE_TEST_TOKEN"], "file-token")
+        self.assertEqual(token_value, "file-token")
         self.assertEqual(api_url_value, "https://file-proxy.example/api")
 
     def test_fetch_daily_bars_reads_token_and_url_from_env_file(self):
@@ -548,43 +579,73 @@ class TushareQuantTests(unittest.TestCase):
         tq = load_tq_module()
         fake_tushare, _calls = make_fake_tushare_module(fail_adjusted=True)
         sys.modules["tushare"] = fake_tushare
-        os.environ["TUSHARE_TOKEN"] = "test-token"
-        try:
-            rows, source = tq.load_rows(
-                "600519",
-                "20240101",
-                "20240102",
-                "tushare",
-                api_url="https://tushare-proxy.example/api",
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text(
+                "TUSHARE_TOKEN=test-token\nTUSHARE_API_URL=https://tushare-proxy.example/api\n",
+                encoding="utf-8",
             )
-        finally:
-            sys.modules.pop("tushare", None)
+            tq.tushare_client.DEFAULT_ENV_FILE = env_path
             os.environ.pop("TUSHARE_TOKEN", None)
-            sys.modules.pop("tushare_client", None)
+            os.environ.pop("TUSHARE_API_URL", None)
+            try:
+                rows, source = tq.load_rows(
+                    "600519",
+                    "20240101",
+                    "20240102",
+                    "tushare",
+                )
+            finally:
+                sys.modules.pop("tushare", None)
+                os.environ.pop("TUSHARE_TOKEN", None)
+                os.environ.pop("TUSHARE_API_URL", None)
+                sys.modules.pop("tushare_client", None)
 
         self.assertEqual(rows[0]["trade_date"], "20240101")
         self.assertIn("unadjusted fallback", source)
 
-    def test_skill_warns_windows_users_to_read_chinese_files_as_utf8(self):
-        skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
+    def test_tq_cli_does_not_expose_api_url_override(self):
+        tq = load_tq_module()
+        parser = tq.build_parser()
+        help_text = parser.format_help()
 
-        self.assertIn("Get-Content -Encoding UTF8", skill_text)
-        self.assertIn("PYTHONIOENCODING=utf-8", skill_text)
+        self.assertNotIn("--api-url", help_text)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            parser.parse_args(["analyze", "--api-url", "https://proxy.example/api"])
+        self.assertNotEqual(raised.exception.code, 0)
+        self.assertIn("unrecognized arguments: --api-url", stderr.getvalue())
+
+    def test_skill_warns_windows_users_to_read_chinese_files_as_utf8(self):
+        script_guide = ROOT / "tushare-quant" / "references" / "script-guide.md"
+        guide_text = script_guide.read_text(encoding="utf-8")
+
+        self.assertIn("Get-Content -Encoding UTF8", guide_text)
+        self.assertIn("PYTHONIOENCODING=utf-8", guide_text)
 
     def test_skill_documents_local_env_file_configuration(self):
-        skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
+        script_guide = ROOT / "tushare-quant" / "references" / "script-guide.md"
+        guide_text = script_guide.read_text(encoding="utf-8")
         env_example = ROOT / "tushare-quant" / ".env.example"
 
         self.assertTrue(env_example.exists())
-        self.assertIn("tushare-quant/.env", skill_text)
-        self.assertIn("External environment variables take precedence", skill_text)
+        self.assertIn("tushare-quant/.env", guide_text)
+        self.assertIn("Harness reads `TUSHARE_TOKEN` and `TUSHARE_API_URL` only from `tushare-quant/.env`", guide_text)
+        self.assertNotIn("External environment variables take precedence", guide_text)
+        self.assertNotIn("export it in the shell", guide_text)
+        self.assertNotIn("--api-url", guide_text)
 
     def test_skill_documents_local_virtualenv_python_usage(self):
         skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
+        script_guide = ROOT / "tushare-quant" / "references" / "script-guide.md"
+        guide_text = script_guide.read_text(encoding="utf-8")
 
-        self.assertIn("tushare-quant/.venv", skill_text)
-        self.assertIn(r"tushare-quant\.venv\Scripts\python.exe", skill_text)
-        self.assertIn("tushare-quant/.venv/bin/python", skill_text)
+        self.assertIn("references/script-guide.md", skill_text)
+        self.assertNotIn("-m pip install -r", skill_text)
+        self.assertNotIn("tq.py analyze --symbol", skill_text)
+        self.assertIn("tushare-quant/.venv", guide_text)
+        self.assertIn(r"tushare-quant\.venv\Scripts\python.exe", guide_text)
+        self.assertIn("tushare-quant/.venv/bin/python", guide_text)
         self.assertNotRegex(skill_text, r"(?m)^python tushare-quant/scripts/tq\.py analyze")
 
     def test_requirements_declares_live_data_dependencies(self):
@@ -601,10 +662,40 @@ class TushareQuantTests(unittest.TestCase):
             self.assertIn(dependency, requirements)
 
     def test_skill_documents_fetch_daily_bars_import(self):
+        guide_text = (ROOT / "tushare-quant" / "references" / "script-guide.md").read_text(encoding="utf-8")
+
+        self.assertIn("from scripts.tushare_client import fetch_daily_bars", guide_text)
+        self.assertNotIn("get_client", guide_text)
+
+    def test_skill_routes_harness_to_script_guide_before_running_scripts(self):
         skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("from scripts.tushare_client import fetch_daily_bars", skill_text)
-        self.assertNotIn("get_client", skill_text)
+        self.assertIn("Read `references/script-guide.md` before running bundled scripts", skill_text)
+        self.assertLess(skill_text.index("references/script-guide.md"), skill_text.index("## Workflow"))
+
+    def test_script_guide_documents_script_purposes_and_required_inputs(self):
+        guide_text = (ROOT / "tushare-quant" / "references" / "script-guide.md").read_text(encoding="utf-8")
+
+        for text in [
+            "`scripts/tq.py`",
+            "`scripts/tushare_client.py`",
+            "`scripts/indicators.py`",
+            "`scripts/backtest.py`",
+            "`scripts/report.py`",
+            "Required inputs",
+            "`--symbol`",
+            "`--start`",
+            "`--end`",
+            "`--strategy`",
+            "`--initial-cash`",
+            "`--fee-rate`",
+            "`--benchmark`",
+            "`--source`",
+            "`TUSHARE_API_URL`",
+            "fetch_analysis_bundle",
+            "unadjusted fallback",
+        ]:
+            self.assertIn(text, guide_text)
 
     def test_skill_requires_comprehensive_single_stock_reports(self):
         skill_text = (ROOT / "tushare-quant" / "SKILL.md").read_text(encoding="utf-8")
