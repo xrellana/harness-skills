@@ -2,29 +2,16 @@
 
 Read this before running bundled scripts or importing helper functions from `tushare-quant/scripts`.
 
-## Runtime Setup
+## Data Flow
 
-Use a skill-local virtual environment at `tushare-quant/.venv`. If it is missing, create it and install the bundled dependencies before running live-data scripts:
+`tq.py` orchestrates the common workflows. It uses `tushare_client.py` to fetch and normalize market data, `indicators.py` to enrich rows with technical fields, `backtest.py` to evaluate generated or custom signals, and `report.py` to produce the final Chinese report.
 
-```powershell
-py -m venv tushare-quant\.venv
-tushare-quant\.venv\Scripts\python.exe -m pip install -r tushare-quant\requirements.txt
-```
+Typical report flow:
 
-```bash
-python3 -m venv tushare-quant/.venv
-tushare-quant/.venv/bin/python -m pip install -r tushare-quant/requirements.txt
-```
-
-Use system Python only to create the virtual environment. Do not run the bundled scripts with global Python unless explicitly troubleshooting environment setup.
-
-## Credentials And API URL
-
-Harness reads `TUSHARE_TOKEN` and `TUSHARE_API_URL` only from `tushare-quant/.env`. Use `tushare-quant/.env.example` as the template; never commit the real `.env` file.
-
-Put `TUSHARE_TOKEN=...` in `.env` for live data. Put `TUSHARE_API_URL=...` in `.env` only when using a DataApi-compatible reverse proxy that supports the endpoints the SDK calls.
-
-If the token is unavailable, use `--source sample` only for tool validation and say clearly that sample data is not market data.
+1. `tushare_client.py` fetches daily bars and optional analysis data.
+2. `indicators.py` enriches daily rows with MA, MACD, and KDJ fields.
+3. `backtest.py` consumes enriched rows plus a same-length signal list when a strategy result is needed.
+4. `report.py` formats enriched rows, backtest results, and optional analysis bundles into user-facing output.
 
 ## Encoding
 
@@ -39,6 +26,11 @@ Get-Content -Encoding UTF8 tushare-quant\references\beginner-terms-zh.md
 ## `scripts/tq.py`
 
 Purpose: command-line entry point for fast first-pass reports.
+
+Python executable:
+
+- Windows Python: `tushare-quant\.venv\Scripts\python.exe`
+- Linux/macOS Python: `tushare-quant/.venv/bin/python`
 
 Commands:
 
@@ -91,11 +83,15 @@ Purpose: dependency-free technical indicators for daily bars.
 
 Required inputs for `add_indicators(rows)`: iterable rows sorted or sortable by the caller, with `close`, `high`, and `low` values. It returns copied rows enriched with `ma5`, `ma10`, `ma20`, `macd_diff`, `macd_dea`, `macd_hist`, `kdj_k`, `kdj_d`, and `kdj_j`.
 
+Boundary: use this as the pure indicator layer after market data is available. It does not fetch data, build signals, or print reports.
+
 ## `scripts/backtest.py`
 
 Purpose: minimal long-only backtesting for first-pass strategy checks.
 
 Required inputs for `run_signal_backtest(rows, signals, initial_cash=100000.0, fee_rate=0.001)`: market rows with `close`, a same-length signal sequence where truthy means long and falsy means cash, initial cash, and fee rate. It returns initial cash, final equity, total return, max drawdown, trade count, fee rate, and an equity curve.
+
+Boundary: use this after indicators and signal rules are already prepared. It does not create signals or fetch market data.
 
 This backtester does not model T+1, price-limit execution failures, suspensions, slippage beyond `fee_rate`, or survivorship bias unless the caller adds that logic.
 
@@ -106,3 +102,5 @@ Purpose: format beginner-friendly Chinese reports after data, indicators, and op
 Required inputs for `format_indicator_report(symbol, rows, source, analysis=None)`: indicator-enriched rows and a source label. Pass the `fetch_analysis_bundle(...)` output as `analysis` for comprehensive single-stock reports.
 
 Required inputs for `format_backtest_report(symbol, strategy, rows, result, source)`: market rows, a strategy name, a backtest result from `run_signal_backtest(...)`, and a source label.
+
+Boundary: this is the standard final formatting layer. Prefer it for final user-facing output so data source, sample period, analysis sections, explanations, and risk boundaries stay consistent. Do not bypass it for standard reports; only custom analysis should assemble a bespoke response.

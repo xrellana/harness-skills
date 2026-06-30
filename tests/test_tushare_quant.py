@@ -650,14 +650,15 @@ class TushareQuantTests(unittest.TestCase):
         self.assertIn("Get-Content -Encoding UTF8", guide_text)
         self.assertIn("PYTHONIOENCODING=utf-8", guide_text)
 
-    def test_skill_documents_local_env_file_configuration(self):
-        script_guide = ROOT / "tushare-quant" / "references" / "script-guide.md"
-        guide_text = script_guide.read_text(encoding="utf-8")
-        env_example = ROOT / "tushare-quant" / ".env.example"
+    def test_script_guide_omits_runtime_setup_and_credentials_sections(self):
+        guide_text = (ROOT / "tushare-quant" / "references" / "script-guide.md").read_text(encoding="utf-8")
 
-        self.assertTrue(env_example.exists())
-        self.assertIn("tushare-quant/.env", guide_text)
-        self.assertIn("Harness reads `TUSHARE_TOKEN` and `TUSHARE_API_URL` only from `tushare-quant/.env`", guide_text)
+        self.assertNotIn("## Runtime Setup", guide_text)
+        self.assertNotIn("## Credentials And API URL", guide_text)
+        self.assertNotIn("py -m venv", guide_text)
+        self.assertNotIn("python3 -m venv", guide_text)
+        self.assertNotIn("-m pip install -r", guide_text)
+        self.assertNotIn("tushare-quant/.env.example", guide_text)
         self.assertNotIn("External environment variables take precedence", guide_text)
         self.assertNotIn("export it in the shell", guide_text)
         self.assertNotIn("--api-url", guide_text)
@@ -670,6 +671,8 @@ class TushareQuantTests(unittest.TestCase):
         self.assertIn("references/script-guide.md", skill_text)
         self.assertNotIn("-m pip install -r", skill_text)
         self.assertNotIn("tq.py analyze --symbol", skill_text)
+        self.assertIn("Windows Python: `tushare-quant\\.venv\\Scripts\\python.exe`", guide_text)
+        self.assertIn("Linux/macOS Python: `tushare-quant/.venv/bin/python`", guide_text)
         self.assertIn("tushare-quant/.venv", guide_text)
         self.assertIn(r"tushare-quant\.venv\Scripts\python.exe", guide_text)
         self.assertIn("tushare-quant/.venv/bin/python", guide_text)
@@ -718,9 +721,25 @@ class TushareQuantTests(unittest.TestCase):
             "`--fee-rate`",
             "`--benchmark`",
             "`--source`",
-            "`TUSHARE_API_URL`",
             "fetch_analysis_bundle",
             "unadjusted fallback",
+        ]:
+            self.assertIn(text, guide_text)
+
+    def test_script_guide_documents_data_flow_and_script_boundaries(self):
+        guide_text = (ROOT / "tushare-quant" / "references" / "script-guide.md").read_text(encoding="utf-8")
+
+        for text in [
+            "## Data Flow",
+            "`tq.py` orchestrates",
+            "`tushare_client.py` fetches",
+            "`indicators.py` enriches",
+            "`backtest.py` consumes",
+            "`report.py` formats",
+            "It does not fetch data, build signals, or print reports.",
+            "It does not create signals or fetch market data.",
+            "Prefer it for final user-facing output",
+            "Do not bypass it for standard reports",
         ]:
             self.assertIn(text, guide_text)
 
